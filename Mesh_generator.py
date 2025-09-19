@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     # Define circle points
     R = 1.0
-    n_points = 40
+    n_points = 50
     theta = np.linspace(0, 2*np.pi, n_points, endpoint=False)
     pts = np.column_stack((R*np.cos(theta), R*np.sin(theta)))
 

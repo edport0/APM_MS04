@@ -1,0 +1,220 @@
+\documentclass{article}
+
+% --- PAQUETS EXISTANTS ---
+\usepackage{graphicx} 
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{ragged2e}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{subcaption} 
+
+
+% --- AJOUT DU PAQUET POUR LES EN-TÊTES ---
+\usepackage{fancyhdr} % Charge le paquet pour personnaliser les en-têtes et pieds de page
+
+% --- CONFIGURATION DE L'EN-TÊTE ---
+\pagestyle{fancy} % Active le style de page personnalisé "fancy"
+\fancyhf{} % Efface toutes les configurations précédentes de l'en-tête et du pied de page
+\renewcommand{\headrulewidth}{0.4pt} % Ajoute une ligne horizontale sous l'en-tête
+\renewcommand{\footrulewidth}{0pt} % Supprime la ligne du pied de page (optionnel)
+
+% Place les noms des auteurs à droite dans l'en-tête
+\fancyhead[R]{Eduardo Porto et Cleiton Tonato} 
+% Place le numéro de page au centre du pied de page
+\fancyfoot[C]{\thepage} 
+
+% --- CONFIGURATION DU STYLE POUR LA PREMIÈRE PAGE (où se trouve \maketitle) ---
+% Par défaut, la première page a le style "plain", nous le redéfinissons pour qu'il soit identique
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyhead[R]{Eduardo Porto et Cleiton Tonato}%
+  \fancyfoot[C]{\thepage}%
+  \renewcommand{\headrulewidth}{0.4pt}%
+}
+
+\lstset{
+  language=C++,
+  basicstyle=\ttfamily\small,
+  numbers=left,
+  numberstyle=\tiny,
+  stepnumber=1,
+  numbersep=5pt,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  breaklines=true,
+  frame=single,
+  tabsize=2,
+  captionpos=b
+}
+
+% --- INFORMATIONS DU DOCUMENT ---
+\title{MS01 - Projet 1 : Problème avec grille structurée}
+\date{} 
+
+\begin{document}
+
+\maketitle
+
+On veut résoudre l'équation $\Delta u=f$ sur $(0,a)\times(0,b)$ avec des conditions aux limites $u(x,0) = u(x,b) = u(a,y) = U_0$ et $u(0,y) = U_0(1+ \alpha V(y))$ avec $V(y) = 1 - \mathrm{cos}(2 \pi y/b)  $, en supposant aussi que $f=0$, en utilisant les schémas itératifs de Jacobi et de Gauss--Seidel (GS). 
+
+On considère la matrice des inconnues discrètes $u_{i,j}\approx u(x_i,y_j)$ pour $1\le i\le N_x$, $1\le j\le N_y$,
+avec les conditions limites imposées, et l’opérateur de Laplace discret à 5 points :
+\[
+(\Delta_h u)_{i,j}
+= \frac{u_{i+1,j}-2u_{i,j}+u_{i-1,j}}{h_x^2}
+ + \frac{u_{i,j+1}-2u_{i,j}+u_{i,j-1}}{h_y^2},
+\qquad 1\le i\le N_x,\ 1\le j\le N_y.
+\]
+
+Une solution fabriquée $u=\sin(\pi x/a)\sin(\pi y/b)$ fournit $f=-((\pi^2/a^2)+(\pi^2/b^2))u$, ce qui permet de mesurer l'erreur. On implémente des versions séquentielles et une version paralelisée en utilisant la bibliothèque MPI et en faisant une décomposition en bandes verticales (1D en $x$) dont on communique les valeurs entre les frontières de chaque bande verticale. Pour la performance, on fixe le nombre d'itérations et on chronomètre uniquement la boucle d'itération. 
+
+Pour construire le code sequentiel et le valider correctement, on se donne une solution connue fabriquée avec sa respective fonction $f$. Pour les conditions aux limites, on impose $U_0 = 0$ de façon à avoir des conditions de Dirichlet homogènes. On fait intervenir alors $u(x,y)=\sin(\pi x/a)\sin(\pi y/b)$ fournit par $f(x,y)=-((\pi^2/a^2)+(\pi^2/b^2))u(x,y)$, ce qui permet de mesurer l'erreur $L^2$ du schéma numérique entre la valeur de $u^{(k)}$ dans chaque itération et la valeur exacte de $u$.
+
+On considère $N_x=N_y\in\{128,256,512,1024\}$ et on fait varier le nombre d'itérations pour étudier la convergence de l'algorithme par rapport au calcul du résidu et de l'erreur. Pour l'instant on n'est pas intéressé par le temps de calcul - cela sera le sujet central de la parallélisation avec MPI. Voyons comment le résidu et l'erreur sont définis dans ce cas.
+
+Pour une itération courante $u_{i,j}$, le résidu au point intérieur $(i,j)$ est
+\[
+r_{i,j} \;=\; (\Delta_h u)_{i,j}\;-\; f_{i,j},\qquad
+f_{i,j}=f(x_i,y_j).
+\]
+La norme $L^2$ discrète du résidu vaut
+\[
+\|r\|_{L^2_h}
+\;=\;
+\Bigg( \sum_{i=1}^{N_x}\sum_{j=1}^{N_y} h_x h_y\, r_{i,j}^2 \Bigg)^{1/2}.
+\]
+
+On note que le résidu est calculé seulement pour les noeuds à l'intérieur du domaine et que quand l’itération converge vers la solution discrète $u^h$ du système $A u=b$, alors $r=b-Au\to 0$.
+
+Comme l’on connaît une solution exacte dans ce cas, qu'on appellera $u_{\mathrm{ref}}(x,y)$,
+on définit l’erreur nodale $e_{i,j}=u_{i,j}-u_{\mathrm{ref}}(x_i,y_j)$ et on est en mésure de calculer la norme $L^2$ et la norme $L^{\infty}$ de l'erreur :
+\[
+\|e\|_{L^2_h}
+\;=\;
+\Bigg( \sum_{i=1}^{N_x}\sum_{j=1}^{N_y} h_x h_y\, e_{i,j}^2 \Bigg)^{1/2},
+\qquad
+\|e\|_{\infty,h}
+\;=\;
+\max_{1\le i\le N_x,\ 1\le j\le N_y} |e_{i,j}|.
+\]
+
+Avec ces outils qu'on a implementé dans le code sequentiel et avec une routine en python pour traiter les données on retrouve les Figures \ref{fig:jacobi_res} et \ref{fig:jacobi_err} suivantes :
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.5\linewidth]{Rapport final/Images/jacobi_seq_residual_merged_linear.png}
+  \caption{Convergence Jacobi (séquentiel) : Résidu L2 en fonction du nombre d'itérations.}
+  \label{fig:jacobi_res}
+\end{figure}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.5\linewidth]{Rapport final/Images/jacobi_seq_errorL2_merged_linear.png} % ou _linear.png
+  \caption{Convergence Jacobi (séquentiel) : Erreur L2 en fonction du nombre d'itérations.}
+  \label{fig:jacobi_err}
+\end{figure}
+
+On voit bien la convergence de la methòde de Jacobi et le code \texttt{jacobi\_seq.cpp} est donc validé. Ainsi, on suit avec l'étape de parallélisation du code avec MPI, cette fois-ci pour le problème de l'énonce dont on n'a pas la solution analytique \textit{a priori}. On s'interessera surtout par le résidu et le temps de calcul.
+
+La parallélisation a lieu à partir d'une décomposition 1D en bandes verticales (répartition des colonnes). À chaque itération on réalise une échange non bloquant des colonnes fantômes (gauche/droite) via \texttt{MPI\_Irecv/Isend}, puis balayage local. On fait aussi une réduction globale du résidu par \texttt{MPI\_Allreduce}. Pour les mesures, on utilise un nombre d’itérations fixé avec le commande (\texttt{--niters}). D'après ce qu'on observe pour le code séquentiel, on se limite à 100000 itérations.
+
+Dû au fait que les machines de l'ENSTA ont 4 coeurs, on attend qu'on ait une limite d'efficacité pour le nombre de processus, justement à 4 processus. Si on impose des valeurs plus grandes, on n'a pas comment traites une quantité plus grandes de processus et, en effet, le temps de calcul augment lorsque cela exige aussi plus de temps de communication. Pour étudier la scalabilité forte, on regardera la vitesse dans laquelle on résoudre le même problème avec $P$ processeurs - cela n'exige aucun changement par rapport à ce qu'on vient de faire pour le code séquentiel. Pour la scalabilité faible, qui consiste en évaluer si avec $P$ processeurs on peut résoudre un problème de taille $P \times$ l'originale avec le même \textit{runtime}, on part d'une grille $N_x \times N_y = 512 \times 512$ et on la fait croître de façon linéaire $(P \times N_x) \times N_y = (P \times 512) \times 512$. Pour condenser les résultats en ce moment, on montre le temps de calcul pour chaque taille de grille $(512\times 512, 1024\times 512, 2048 \times 512) $ en faisant varier le nombre de processus. La Figure \ref{fig:jacobi_mpi} montre le résultat des simulations :
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.8\linewidth]{Rapport final/Images/jacobi_mpi_time_vs_np.png} % ou _linear.png
+  \caption{Convergence Jacobi (séquentiel) : Temps de calcul en fonction du nombre de processus $N_p$.}
+  \label{fig:jacobi_mpi}
+\end{figure}
+
+\section{Méthode de Gauss--Seidel (GS) : théorie, différences avec Jacobi et parallélisation}
+
+\subsection{Problème et discrétisation}
+On considère le problème de Laplace sur le rectangle $\Omega=(0,a)\times(0,b)$, avec $f\equiv0$ et des conditions de Dirichlet imposées par l'énoncé~\cite{projet1}:
+\[
+\Delta u = 0 \ \text{ dans }\Omega, \qquad
+u(x,0)=u(x,b)=U_0,\quad u(a,y)=U_0,\quad
+u(0,y)=U_0\bigl(1+\alpha(1-\cos(2\pi y/b))\bigr).
+\]
+La discrétisation aux différences finies sur une grille uniforme $x_i=i\,\Delta x$, $y_j=j\,\Delta y$, $i=0,\dots,N_x{+}1$, $j=0,\dots,N_y{+}1$ conduit, pour $1\le i\le N_x$, $1\le j\le N_y$, à
+\[
+\frac{u_{i+1,j}-2u_{i,j}+u_{i-1,j}}{\Delta x^2}
++
+\frac{u_{i,j+1}-2u_{i,j}+u_{i,j-1}}{\Delta y^2} = 0.
+\]
+On note $A u = 0$ le système linéaire associé, avec $A$ la matrice (symétrique définie positive et de type $M$ pour ce modèle). \cite{projet1}
+
+\subsection{Jacobi vs Gauss--Seidel : mise à jour des inconnues}
+\paragraph{Jacobi.} À l’itération $k$, on calcule $u^{k+1}$ à partir de $u^k$ en \emph{utilisant uniquement des valeurs de l’itération $k$} :
+\[
+u^{k+1}_{i,j} \;=\;
+\frac{
+\frac{u^k_{i+1,j}+u^k_{i-1,j}}{\Delta x^2}
++
+\frac{u^k_{i,j+1}+u^k_{i,j-1}}{\Delta y^2}
+}{
+2\!\left(\frac{1}{\Delta x^2}+\frac{1}{\Delta y^2}\right)}.
+\]
+C’est un schéma \emph{hors-place} (on stocke typiquement $u^{k+1}$ dans un tableau séparé).
+
+\paragraph{Gauss--Seidel (lexicographique).} À l’itération $k$, on parcourt les n{\oe}uds dans un ordre (par ex. $j$ croissant, puis $i$ croissant) et l’on \emph{réutilise dès que possible} les valeurs déjà mises à jour :
+\[
+u^{k+1}_{i,j} \;=\;
+\frac{
+\frac{u^{k+1}_{i-1,j}+u^{k}_{i+1,j}}{\Delta x^2}
++
+\frac{u^{k+1}_{i,\,j-1}+u^{k}_{i,\,j+1}}{\Delta y^2}
+}{
+2\!\left(\frac{1}{\Delta x^2}+\frac{1}{\Delta y^2}\right)}.
+\]
+C’est un schéma \emph{en place} : les nouvelles valeurs remplacent immédiatement les anciennes (pas de second tableau). Dans notre code séquentiel, cette mise à jour correspond exactement à la forme précédente avec $f\equiv0$ (voir \texttt{gauss\_seidel\_seq.cpp}). \cite{gsseq}
+
+\subsection{Pourquoi GS converge (en général) en moins d’itérations ?}
+On note $A=D-L-U$ la décomposition de $A$ (diagonale $D$, parties strictes $L$ et $U$).
+Les itérations de point fixe s’écrivent $u^{k+1}=T\,u^{k}+c$. Les matrices d’itération sont :
+\[
+\text{Jacobi:}\quad T_J = D^{-1}(L+U),
+\qquad
+\text{GS:}\quad T_{GS} = (D-L)^{-1}U.
+\]
+La vitesse de convergence dépend du rayon spectral $\rho(T)$: plus $\rho(T)$ est petit, plus la décroissance est rapide. Pour des matrices SPD issues du Laplacien à 5 points, on a des résultats classiques d’analyse de Fourier (modes sinusoïdaux) montrant que $T_{GS}$ amortit mieux les hautes fréquences que $T_J$ (propriété de \emph{lisseur}). En pratique, on observe \emph{toujours} $\rho(T_{GS}) < \rho(T_J)$, et souvent une relation du type
+\[
+\rho(T_{GS}) \;\lesssim\; \rho(T_J)^2,
+\]
+ce qui explique qu’à tolérance fixée, GS demande \emph{moins d’itérations} que Jacobi. Intuitivement: dès qu’une valeur a été améliorée, GS la réutilise immédiatement dans les voisins, d’où une propagation de l’information plus rapide dans la grille.
+
+\subsection{Défis de la parallélisation de Gauss--Seidel}
+Le frein principal vient du caractère \emph{en place} de GS : l’ordre de balayage crée des \textbf{dépendances de données} entre n{\oe}uds voisins. En parallèle, si deux sous-domaines voisins mettent à jour des points qui dépendent l’un de l’autre au \emph{même} instant, on introduit un hazard (donnée potentiellement non à jour).
+
+\paragraph{Partition 1D en bandes verticales.} Comme pour Jacobi, on découpe $\{1,\dots,N_x\}$ en $P$ bandes en $x$ (une par processus), avec échanges de \emph{halos} (colonnes fantômes) à gauche/droite. Le ratio communication/calcul croît avec $P$ (effet surface/volume) : le volume local est $\mathcal{O}(N_xN_y/P)$ tandis que l’interface est $\mathcal{O}(N_y)$ pour une partition 1D~; on retrouve les considérations de scalabilité et de coûts de communication vues en cours (latence, débit, \emph{strong}/\emph{weak} scaling, effet surface/volume)~\cite{slides4}. 
+
+\paragraph{Dépendances intra-itération.} Contrairement à Jacobi (toutes les mises à jour indépendantes à itération fixée), GS doit s’assurer que les voisins nécessaires ont des valeurs cohérentes \emph{au moment} de la mise à jour. C’est incompatible avec un balayage naïf simultané sur plusieurs processus.
+
+\subsection{Solution \emph{noir/rouge} (coloriage damier)}
+Pour lever les dépendances, on colorie la grille en \emph{damier} : un n{\oe}ud $(i,j)$ est dit \emph{rouge} si $(i+j)$ est pair, \emph{noir} sinon. Tous les voisins d’un n{\oe}ud rouge sont noirs, et réciproquement. On procède alors par \textbf{deux sous-balayages par itération} :
+\begin{enumerate}
+  \item Mise à jour de \emph{tous} les points rouges (en parallèle) à partir de valeurs noires (anciennes)~;
+  \item échange de halos (colonnes fantômes) pour propager les nouvelles valeurs rouges aux sous-domaines voisins~;
+  \item mise à jour de \emph{tous} les points noirs à partir des rouges \emph{mis à jour}~;
+  \item échange de halos à nouveau.
+\end{enumerate}
+Cette stratégie rend les sous-problèmes \emph{indépendants par couleur} et restaure un parallélisme massif à l’intérieur de chaque couleur. Dans l’implémentation MPI (partition 1D en $x$), il est crucial d’employer la \textbf{parité globale} $(x_{\mathrm{glob}}+j)\bmod 2$ pour que les couleurs coïncident \emph{à travers} les interfaces de sous-domaines, et de réaliser \emph{deux échanges halo par itération} (après rouge, puis après noir). \cite{gsmpi}
+
+\paragraph{Coût communication \& cadence.} Chaque processus échange deux colonnes de hauteur $N_y{+}2$ (incluant coins) après le sous-balayage rouge, puis à nouveau après le noir. Le coût par itération est donc \emph{deux fois} celui de Jacobi (qui n’échange qu’une fois par itération dans la version standard), mais GS nécessite \emph{moins d’itérations} pour une tolérance donnée ; le compromis dépend de la granularité ($N_x,N_y$) et de $P$ (effet surface/volume~\cite{slides4}).
+
+\paragraph{Points d’attention pratiques.} 
+(i) Effectuer un \textbf{échange halo initial} avant la première mise à jour, pour initialiser les fantômes avec des valeurs cohérentes (frontières ou intérieurs voisins). 
+(ii) Ne jamais mettre à jour les bords de Dirichlet dans les balayages. 
+(iii) En mode \emph{benchmark} (nombre d’itérations fixé), éviter les réductions globales à chaque itération pour obtenir des temps de calcul propres ; en mode \emph{tolérance}, une réduction globale du résidu $L^2$ est nécessaire à chaque pas.
+
+\subsection{Bilan et comparaison avec Jacobi}
+\begin{itemize}
+  \item \textbf{Itérations} : GS amortit plus vite les erreurs (surtout hautes fréquences) que Jacobi, d’où un nombre d’itérations plus faible à tolérance identique.
+  \item \textbf{Parallélisation} : Jacobi est trivialement parallèle (une phase d’échange par itération). GS requiert le coloriage noir/rouge et \emph{deux} échanges par itération, mais reste efficace si la granularité est suffisante et si les échanges sont correctement masqués/ordonnés.
+  \item \textbf{Scalabilité} : comme pour Jacobi, la partition 1D subit l’augmentation relative des communications quand $P$ croît ; une partition 2D peut améliorer le rapport surface/volume pour de grands $P$~\cite{slides4}.
+\end{itemize}
+
+
+\end{document}
+

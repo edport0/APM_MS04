@@ -44,7 +44,8 @@ if __name__ == "__main__":
     R = 1.0
     n_points = 50
     theta = np.linspace(0, 2*np.pi, n_points, endpoint=False)
-    pts = np.column_stack((R*np.cos(theta), R*np.sin(theta)))
+    #pts = np.column_stack((R*np.cos(theta), R*np.sin(theta)))
+    pts = np.column_stack([np.linspace(0, R, n_points, endpoint = True), np.zeros(n_points)])
 
     # Build mesh
     mesh = build_mesh_from_points(pts, closed=True)

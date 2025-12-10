@@ -23,24 +23,28 @@ def green(z1, z2, k):
 
 def green_singular(z_i, z_j_array):
     dist = np.linalg.norm(z_j_array - z_i[None, :], axis=1)
-    # Adicionamos uma pequena constante para evitar log(0) se um ponto coincidir,
-    epsilon = 1e-15 
+    epsilon = 1e-15  # avoid log(0) in degenerate cases
+    return (-1.0 / (2.0 * np.pi)) * np.log(dist + epsilon)
 
-    return (-1 / (2 * np.pi)) * np.log(dist + epsilon)
 
 def green_regular(z_i, z_j_array, k):
+    """
+    Regular part of the Green kernel
+        G_reg = G - G_sing,
+    with the constant chosen from the asymptotic expansion (TP eq. (3)).
+    """
     dist = np.linalg.norm(z_j_array - z_i[None, :], axis=1)
 
-    const_part = (1j / 4) + (1 / (2 * np.pi)) * (np.log(k / 2) + gamma)
+    # Limit r -> 0 of G - G_sing:
+    #   i/4 - (1/(2π)) [ ln(k^2/4) + γ ]
+    const_part = (1j / 4.0) - (1.0 / (2.0 * np.pi)) * (np.log(k**2 / 4.0) + gamma)
+
     regular_part = np.full(dist.shape, const_part, dtype=np.complex128)
 
-    # Define um limiar para decidir quando a subtração é segura
+    # Only for sufficiently "far" points we do the subtraction G - G_sing numerically
     threshold = 1e-10
-    
-    # Encontra os índices onde a distância é grande o suficiente
     safe_indices = np.where(dist > threshold)[0]
 
-    # Apenas para esses índices, calcula a G_reg pela subtração
     if safe_indices.size > 0:
         z_j_safe = z_j_array[safe_indices]
         regular_part[safe_indices] = green(z_i, z_j_safe, k) - green_singular(z_i, z_j_safe)
@@ -48,15 +52,25 @@ def green_regular(z_i, z_j_array, k):
     return regular_part
 
 #calcula o segundo membro
-def b (k,mesh,n_quad,n_points):
-    b=np.zeros(n_points, dtype=np.complex128)
-    for i in range(n_points): 
-        Y0 = mesh.extremities[i,0,:] #size (n_points, [x1,x2])
-        Y1 = mesh.extremities[i,1,:]
-        g = lambda X: u_inc(k,X,theta0=0.0)
-        b[i] = quad_segment(g,Y0,Y1,n_quad)
+def b(k, mesh, n_quad):
+    """
+    Assemble the RHS b for the integral equation:
+        ∫_Γ G(x,y) p(y) dΓ(y) = -u_inc(x)
+    with P0 basis (one unknown per segment).
+    """
+    n_el = mesh.extremities.shape[0]
+    rhs = np.zeros(n_el, dtype=np.complex128)
 
-    return b
+    def g(X):
+        return u_inc(k, X, theta0=0.0)
+
+    for i in range(n_el):
+        Y0 = mesh.extremities[i, 0, :]
+        Y1 = mesh.extremities[i, 1, :]
+        rhs[i] = quad_segment(g, Y0, Y1, n_quad)
+
+    return rhs
+
 
 def calculate_Mii_regular(Y0i, Y1i, k, n_quad):
     # Define a função para a integral interna: F_reg(z_i) = ∫_Γi G_reg(z_i, z_j) dΓj
@@ -100,35 +114,45 @@ def calculate_Mii_singular(Y0i, Y1i, n_quad):
     return quad_segment(inner_integral_singular_analytical, Y0i, Y1i, n_quad)
 
 #calculo cabuloso da matriz
-def M (mesh,n_quad,n,k):
-    M_matrix=np.zeros((n,n), dtype=np.complex128)
+def M(mesh, n_quad, n, k):
+    """
+    Assemble the matrix M_ij = ∫_{Γ_i} ∫_{Γ_j} G(x, y) dΓ(y) dΓ(x)
+    with a P0 discretization and semi-analytic treatment of the diagonal.
+    """
+    M_matrix = np.zeros((n, n), dtype=np.complex128)
+
     for i in range(n):
-        Y0i=mesh.extremities[i,0,:]
-        Y1i=mesh.extremities[i,1,:]
+        Y0i = mesh.extremities[i, 0, :]
+        Y1i = mesh.extremities[i, 1, :]
 
-        for j in range(n):
-            Y0j=mesh.extremities[j,0,:]
-            Y1j=mesh.extremities[j,1,:]
+        for j in range(i, n):  # j >= i, use symmetry
+            Y0j = mesh.extremities[j, 0, :]
+            Y1j = mesh.extremities[j, 1, :]
 
-            if (i != j):
+            if i != j:
+                # regular double integral over element i and j
                 def integral_elemento_j(pontos_elemento_i):
-                    results = np.zeros(pontos_elemento_i.shape[0], dtype=np.complex128) #initialize
-        
-                    for idx, zi in enumerate(pontos_elemento_i): #idx é o contador de posição
-                        
-                        integrando = lambda pontos_elemento_j: green(zi, pontos_elemento_j, k)
-                        results[idx] = quad_segment(integrando, Y0j, Y1j, n_quad)
-                        
+                    # pontos_elemento_i: array of points on Γ_i
+                    results = np.zeros(pontos_elemento_i.shape[0], dtype=np.complex128)
+
+                    for idx, zi in enumerate(pontos_elemento_i):
+                        integrand = lambda pontos_elemento_j: green(zi, pontos_elemento_j, k)
+                        results[idx] = quad_segment(integrand, Y0j, Y1j, n_quad)
+
                     return results
 
-                M_matrix[i, j] = quad_segment(integral_elemento_j, Y0i, Y1i, n_quad)
-            
-            else :
+                val = quad_segment(integral_elemento_j, Y0i, Y1i, n_quad)
+                M_matrix[i, j] = val
+                M_matrix[j, i] = val  # symmetry
+
+            else:
+                # diagonal: regular + singular parts
                 M_ii_reg = calculate_Mii_regular(Y0i, Y1i, k, n_quad)
                 M_ii_sing = calculate_Mii_singular(Y0i, Y1i, n_quad)
                 M_matrix[i, i] = M_ii_reg + M_ii_sing
 
     return M_matrix
+
 
 def u_inc_field(X, Y, k, theta0=0.0):
     x_rotated = X * np.cos(theta0) + Y * np.sin(theta0)
@@ -139,8 +163,8 @@ if __name__ == "__main__":
 #   Parâmetros 
     k =  np.pi    # Número de onda
     a = 1.0          # Raio do disco
-    n_points = 200  # Número de pontos na fronteira
-    n_quad = 7      # Ordem da quadratura de Gauss
+    n_points = 500  # Número de pontos na fronteira
+    n_quad = 2      # Ordem da quadratura de Gauss
     box_size=5*a    #tamanho do volume
     n_radial, n_angular = 80, 200 # malha no volume
     theta0=0.0 #angulo de incidencia
@@ -153,7 +177,7 @@ if __name__ == "__main__":
     theta_col = np.arctan2(mids[:,1], mids[:,0])
 
     # calcul de la trace
-    B = -b(k,mesh,n_quad,n_points) 
+    B = -b(k, mesh, n_quad)
     A=M(mesh,n_quad,n_points,k)
     p = np.linalg.solve(A, B) #numerico
     #p_analy = -trace_analy(k,a,theta_col,theta0,N=40)

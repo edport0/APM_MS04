@@ -134,7 +134,7 @@ def plot_tree(node, points, ax=None, color='C0'):
 if __name__ == "__main__":
     # Example: circular boundary
     R = 1.0
-    n_points = 64
+    n_points = 32
     theta = np.linspace(0, 2*np.pi, n_points, endpoint=False)
     #pts = np.column_stack([R*np.cos(theta), R*np.sin(theta)])
     pts = np.column_stack([np.linspace(0, R, n_points, endpoint = True), np.zeros(n_points)])
